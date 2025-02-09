@@ -10,20 +10,22 @@ export interface ChatConversation {
 
 interface SidebarProps {
   conversations: ChatConversation[];
-  activeConversation: string | null;
+  activeConversationId: string | null;
+  setActiveConversationId: (id: string | null) => void;
   isCollapsed: boolean;
-  onConversationSelect: (id: string) => void;
-  onNewConversation: () => void;
-  onToggleCollapse: () => void;
+  setIsCollapsed: (collapsed: boolean) => void;
+  learningProgress: any; // Update this type as needed
+  onNewChat: () => void;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
   conversations,
-  activeConversation,
+  activeConversationId,
+  setActiveConversationId,
   isCollapsed,
-  onConversationSelect,
-  onNewConversation,
-  onToggleCollapse,
+  setIsCollapsed,
+  learningProgress,
+  onNewChat,
 }) => {
   return (
     <div 
@@ -33,7 +35,9 @@ const Sidebar: React.FC<SidebarProps> = ({
     >
       {/* Collapse toggle button */}
       <button
-        onClick={onToggleCollapse}
+        onClick={() => {
+          setIsCollapsed(!isCollapsed);
+        }}
         className="absolute -right-3 top-4 bg-white rounded-full p-1 shadow-md hover:shadow-lg transition-shadow"
       >
         {isCollapsed ? (
@@ -45,7 +49,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
       <div className="p-4">
         <button
-          onClick={onNewConversation}
+          onClick={onNewChat}
           className={`${
             isCollapsed 
               ? 'p-2 justify-center'
@@ -61,11 +65,11 @@ const Sidebar: React.FC<SidebarProps> = ({
         {conversations.map((conv) => (
           <div
             key={conv.id}
-            onClick={() => onConversationSelect(conv.id)}
+            onClick={() => setActiveConversationId(conv.id)}
             className={`${
               isCollapsed ? 'px-2 py-3' : 'p-3'
             } cursor-pointer hover:bg-gray-200 transition-colors ${
-              activeConversation === conv.id ? 'bg-gray-200' : ''
+              activeConversationId === conv.id ? 'bg-gray-200' : ''
             }`}
           >
             {isCollapsed ? (

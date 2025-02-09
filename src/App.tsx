@@ -206,6 +206,7 @@ function MainAppContent() {
         isCollapsed={isSidebarCollapsed}
         setIsCollapsed={setIsSidebarCollapsed}
         learningProgress={learningProgress}
+        onNewChat={handleNewConversation}
       />
       
       <main className="flex-1 flex flex-col">
@@ -214,7 +215,12 @@ function MainAppContent() {
             {/* Header with Audio Toggle and Notes Toggle */}
             <div className="flex justify-end mb-6 gap-4">
               <button
-                onClick={() => setIsChatMinimized(!isChatMinimized)}
+                onClick={() => {
+                  setIsChatMinimized(!isChatMinimized);
+                  if (!isChatMinimized) {
+                    setIsSidebarCollapsed(true);
+                  }
+                }}
                 className="flex items-center gap-2 bg-white px-4 py-2 rounded-lg shadow-sm hover:shadow-md transition-all"
               >
                 {isChatMinimized ? <Maximize2 className="text-blue-500" /> : <Minimize2 className="text-blue-500" />}
@@ -418,10 +424,6 @@ function MainAppContent() {
           </div>
         </div>
       </main>
-      
-      {isNotesOpen && (
-        <NotesPanel onClose={() => setIsNotesOpen(false)} />
-      )}
     </div>
   );
 }

@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
-import { Save } from 'lucide-react';
+import { Save, X } from 'lucide-react';
 
 interface NotesPanelProps {
-  isOpen: boolean;
+  onClose: () => void;
 }
 
-const NotesPanel: React.FC<NotesPanelProps> = ({ isOpen }) => {
+const NotesPanel: React.FC<NotesPanelProps> = ({ onClose }) => {
   const [notes, setNotes] = useState('');
 
   const handleSave = () => {
@@ -13,22 +13,14 @@ const NotesPanel: React.FC<NotesPanelProps> = ({ isOpen }) => {
     console.log('Saving notes:', notes);
   };
 
-  if (!isOpen) return null;
-
   return (
-    <div className="bg-white rounded-xl shadow-sm h-[600px] flex flex-col">
-      {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b">
-        <h2 className="text-lg font-semibold">Notes</h2>
-        <button
-          onClick={handleSave}
-          className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-          title="Save notes"
-        >
-          <Save size={20} className="text-gray-600" />
+    <div className="bg-white p-4 rounded-xl shadow-sm h-[600px] flex flex-col">
+      <div className="flex justify-between items-center mb-4">
+        <h3 className="text-lg font-semibold">Notes</h3>
+        <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
+          <X className="w-5 h-5" />
         </button>
       </div>
-
       {/* Notes Content */}
       <div className="flex-1 p-4">
         <textarea
