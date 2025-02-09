@@ -12,6 +12,13 @@ import { v4 as uuidv4 } from 'uuid';
 // Initialize PDF.js worker
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.js`;
 
+// Add this interface near the top after imports
+interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: Date;
+}
+
 function MainAppContent() {
   const [audioEnabled, setAudioEnabled] = useState(false);
   const [message, setMessage] = useState('');
@@ -31,36 +38,74 @@ function MainAppContent() {
     currentTopic: 'Introduction to React',
     timeSpent: '45 minutes'
   });
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    {
+      role: 'assistant',
+      content: "Hello! I'm your AI Learning Assistant. How can I help you today?",
+      timestamp: new Date()
+    }
+  ]);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file && file.type === 'application/pdf') {
+      setIsLoading(true);
       setUploadedFile(file);
       setProgress(0);
-      // Create URL for the uploaded file
-      const fileUrl = URL.createObjectURL(file);
-      setFileUrl(fileUrl);
       
-      // Create a new conversation when a file is uploaded
-      const newConversation: ChatConversation = {
-        id: uuidv4(),
-        fileName: file.name,
-        progress: 0,
-        lastUpdated: new Date()
-      };
-      
-      setConversations(prev => [...prev, newConversation]);
-      setActiveConversationId(newConversation.id);
-      
-      const interval = setInterval(() => {
-        setProgress((prev) => {
-          if (prev >= 100) {
-            clearInterval(interval);
-            return 100;
-          }
-          return prev + 10;
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('start_page', '1');
+        formData.append('professor_name', 'Andrew NG');
+
+        const response = await fetch('http://localhost:8000/upload', {
+          method: 'POST',
+          body: formData,
         });
-      }, 500);
+
+        if (!response.ok) {
+          throw new Error('Upload failed');
+        }
+
+        const data = await response.json();
+        
+        // Add initial response to messages
+        const assistantMessage: ChatMessage = {
+          role: 'assistant',
+          content: data.message,
+          timestamp: new Date()
+        };
+        setMessages(prev => [...prev, assistantMessage]);
+
+        // Create new conversation
+        const newConversation: ChatConversation = {
+          id: data.object_id,
+          fileName: file.name,
+          progress: 100,
+          lastUpdated: new Date()
+        };
+        
+        setConversations(prev => [...prev, newConversation]);
+        setActiveConversationId(newConversation.id);
+        
+        // Handle audio if enabled
+        if (audioEnabled && data.audio_url) {
+          const audio = new Audio(`http://localhost:8000${data.audio_url}`);
+          audio.play();
+        }
+        
+        setProgress(100);
+        const fileUrl = URL.createObjectURL(file);
+        setFileUrl(fileUrl);
+        
+      } catch (error) {
+        console.error('Error uploading file:', error);
+        alert('Failed to upload file. Please try again.');
+      } finally {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -79,10 +124,64 @@ function MainAppContent() {
     // TODO: Load conversation data, messages, and file
   };
 
-  const handleSendMessage = (e: React.FormEvent) => {
+  const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (message.trim()) {
-      setMessage('');
+    if (message.trim() && activeConversationId) {
+      setIsLoading(true);
+      
+      // Add user message immediately
+      const userMessage: ChatMessage = {
+        role: 'user',
+        content: message.trim(),
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, userMessage]);
+      
+      try {
+        const response = await fetch('http://localhost:8000/chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            object_id: activeConversationId,
+            message: message.trim(),
+            current_page: currentPage
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to send message');
+        }
+
+        const data = await response.json();
+        
+        // Add assistant's response
+        const assistantMessage: ChatMessage = {
+          role: 'assistant',
+          content: data.message,
+          timestamp: new Date()
+        };
+        setMessages(prev => [...prev, assistantMessage]);
+        
+        // Handle audio if enabled
+        if (audioEnabled && data.audio_url) {
+          const audio = new Audio(`http://localhost:8000${data.audio_url}`);
+          audio.play();
+        }
+
+        // Update current page if it changed
+        if (data.current_page !== currentPage) {
+          setCurrentPage(data.current_page);
+        }
+
+      } catch (error) {
+        console.error('Error sending message:', error);
+        alert('Failed to send message. Please try again.');
+      } finally {
+        setMessage('');
+        setIsLoading(false);
+      }
     }
   };
 
@@ -246,15 +345,34 @@ function MainAppContent() {
                   {!isChatMinimized && (
                     <div className="w-[400px]">
                       <div className="bg-white p-4 rounded-xl shadow-sm h-[600px] flex flex-col">
-                        <div className="flex-1 overflow-y-auto mb-4">
-                          <div className="flex items-start gap-2 mb-4">
-                            <Bot className="w-8 h-8 text-blue-500" />
-                            <div className="bg-gray-100 rounded-lg p-3 max-w-[80%]">
-                              <p className="text-sm">
-                                Hello! I'm your AI Learning Assistant. How can I help you today?
-                              </p>
+                        <div className="flex-1 overflow-y-auto mb-4 space-y-4">
+                          {messages.map((msg, index) => (
+                            <div key={index} className="flex items-start gap-2">
+                              {msg.role === 'assistant' ? (
+                                <Bot className="w-8 h-8 text-blue-500" />
+                              ) : (
+                                <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center">
+                                  <span className="text-sm">You</span>
+                                </div>
+                              )}
+                              <div className={`rounded-lg p-3 max-w-[80%] ${
+                                msg.role === 'assistant' ? 'bg-gray-100' : 'bg-blue-500 text-white'
+                              }`}>
+                                <p className="text-sm">{msg.content}</p>
+                                <span className="text-xs text-gray-500 mt-1 block">
+                                  {msg.timestamp.toLocaleTimeString()}
+                                </span>
+                              </div>
                             </div>
-                          </div>
+                          ))}
+                          {isLoading && (
+                            <div className="flex items-center gap-2">
+                              <Bot className="w-8 h-8 text-blue-500" />
+                              <div className="bg-gray-100 rounded-lg p-3">
+                                <div className="animate-pulse">Typing...</div>
+                              </div>
+                            </div>
+                          )}
                         </div>
 
                         <form onSubmit={handleSendMessage} className="flex gap-2">
@@ -264,10 +382,14 @@ function MainAppContent() {
                             onChange={(e) => setMessage(e.target.value)}
                             placeholder="Type your message..."
                             className="flex-1 border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            disabled={isLoading}
                           />
                           <button
                             type="submit"
-                            className="bg-blue-500 hover:bg-blue-600 text-white p-2 rounded-lg transition-colors"
+                            className={`${
+                              isLoading ? 'bg-gray-400' : 'bg-blue-500 hover:bg-blue-600'
+                            } text-white p-2 rounded-lg transition-colors`}
+                            disabled={isLoading}
                           >
                             <Send className="w-5 h-5" />
                           </button>
