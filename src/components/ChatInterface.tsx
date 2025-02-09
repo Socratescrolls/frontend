@@ -24,7 +24,7 @@ interface ChatInterfaceProps {
   onChatResponse: (data: any) => void;
 }
 
-export function ChatInterface({ 
+function ChatInterface({ 
   onPlayAudio, 
   currentFileId, 
   currentPage, 
@@ -184,4 +184,6 @@ export function ChatInterface({
       </div>
     </div>
   );
-} 
+}
+
+export default ChatInterface;

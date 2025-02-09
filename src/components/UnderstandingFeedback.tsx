@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertCircle, CheckCircle, ArrowRight, ArrowDown, X, Brain } from 'lucide-react';
+import { AlertCircle, CheckCircle, ArrowRight, ArrowDown, X, Brain, List, HelpCircle } from 'lucide-react';
 
 interface UnderstandingAssessment {
   level: 'low' | 'medium' | 'high';
@@ -12,6 +12,8 @@ interface UnderstandingFeedbackProps {
     understanding_assessment: UnderstandingAssessment;
     recommended_action: 'stay' | 'next';
     reasoning: string;
+    verification_question?: string;
+    key_points?: string[];
   };
   onClose: () => void;
 }
@@ -49,6 +51,7 @@ export function UnderstandingFeedback({ assessment, onClose }: UnderstandingFeed
 
   const { understanding_assessment } = assessment;
   const areasToImprove = understanding_assessment.areas_to_improve || [];
+  const keyPoints = assessment.key_points || [];
 
   return (
     <div className="bg-white rounded-xl shadow-sm p-4 h-[600px] flex flex-col">
@@ -77,6 +80,24 @@ export function UnderstandingFeedback({ assessment, onClose }: UnderstandingFeed
           <p className="text-sm">{understanding_assessment.feedback}</p>
         </div>
 
+        {/* Key Points */}
+        {keyPoints.length > 0 && (
+          <div className="p-4 bg-green-50 rounded-lg">
+            <div className="flex items-center gap-2 mb-2">
+              <List className="w-5 h-5 text-green-600" />
+              <h4 className="font-medium text-green-700">Key Points</h4>
+            </div>
+            <ul className="space-y-2">
+              {keyPoints.map((point, index) => (
+                <li key={index} className="flex items-start gap-2 text-green-600 text-sm">
+                  <span className="text-green-400 mt-1">•</span>
+                  <span>{point}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         {/* Areas to Improve */}
         {areasToImprove.length > 0 && (
           <div className="p-4 bg-blue-50 rounded-lg">
@@ -89,6 +110,17 @@ export function UnderstandingFeedback({ assessment, onClose }: UnderstandingFeed
                 </li>
               ))}
             </ul>
+          </div>
+        )}
+
+        {/* Verification Question */}
+        {assessment.verification_question && (
+          <div className="p-4 bg-purple-50 rounded-lg">
+            <div className="flex items-center gap-2 mb-2">
+              <HelpCircle className="w-5 h-5 text-purple-600" />
+              <h4 className="font-medium text-purple-700">Verification Question</h4>
+            </div>
+            <p className="text-sm text-purple-600">{assessment.verification_question}</p>
           </div>
         )}
 
