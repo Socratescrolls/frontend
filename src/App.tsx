@@ -19,6 +19,13 @@ interface ChatMessage {
   timestamp: Date;
 }
 
+// Add this interface near the top with other interfaces
+interface QuizQuestion {
+  question: string;
+  options?: string[];
+  correctAnswer?: string;
+}
+
 function MainAppContent() {
   const [audioEnabled, setAudioEnabled] = useState(false);
   const [message, setMessage] = useState('');
@@ -46,6 +53,7 @@ function MainAppContent() {
     }
   ]);
   const [isLoading, setIsLoading] = useState(false);
+  const [currentQuiz, setCurrentQuiz] = useState<QuizQuestion | null>(null);
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -156,6 +164,15 @@ function MainAppContent() {
 
         const data = await response.json();
         
+        // Handle verification question if present
+        if (data.verification_question) {
+          setCurrentQuiz({
+            question: data.verification_question,
+            options: data.options || [],
+            correctAnswer: data.correct_answer
+          });
+        }
+        
         // Add assistant's response
         const assistantMessage: ChatMessage = {
           role: 'assistant',
@@ -195,6 +212,15 @@ function MainAppContent() {
 
   const goToNextPage = () => {
     setCurrentPage((prev) => Math.min(prev + 1, numPages));
+  };
+
+  // Add handleQuizSubmit function
+  const handleQuizSubmit = (answer: string) => {
+    if (currentQuiz && currentQuiz.correctAnswer) {
+      const isCorrect = answer === currentQuiz.correctAnswer;
+      // You can handle the result as needed
+      alert(isCorrect ? "Correct!" : "Incorrect. Try again!");
+    }
   };
 
   return (
@@ -415,9 +441,32 @@ function MainAppContent() {
 
               {/* Quiz Section - Full width */}
               <div className="bg-white p-6 rounded-xl shadow-sm">
-                <h3 className="text-lg font-semibold mb-4">Quiz</h3>
+                <h3 className="text-lg font-semibold mb-4">Verification Question</h3>
                 <div className="border-t pt-4">
-                  <p className="text-gray-600">The quiz will appear here after processing your document.</p>
+                  {currentQuiz ? (
+                    <div className="space-y-4">
+                      <p className="text-gray-700 font-medium">{currentQuiz.question}</p>
+                      {currentQuiz.options && (
+                        <div className="space-y-2">
+                          {currentQuiz.options.map((option, index) => (
+                            <button
+                              key={index}
+                              onClick={() => handleQuizSubmit(option)}
+                              className="w-full text-left p-3 rounded-lg border hover:bg-gray-50 
+                                transition-colors duration-200 focus:outline-none focus:ring-2 
+                                focus:ring-blue-500"
+                            >
+                              {option}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-gray-600">
+                      Verification questions will appear here as you chat with the AI.
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
