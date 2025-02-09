@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { Upload, Mic, MicOff, Send, Bot, BarChart2, ChevronLeft, ChevronRight, Minimize2, Maximize2, FileText } from 'lucide-react';
+import { Upload, Mic, MicOff, Send, Bot, BarChart2, ChevronLeft, ChevronRight, Minimize2, Maximize2, FileText, X } from 'lucide-react';
 import { Document, Page, pdfjs } from 'react-pdf';
 import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
 import 'react-pdf/dist/esm/Page/TextLayer.css';
@@ -8,6 +8,9 @@ import Sidebar, { ChatConversation } from './components/Sidebar';
 import NotesPanel from './components/NotesPanel';
 import WelcomeForm from './components/WelcomeForm';
 import { v4 as uuidv4 } from 'uuid';
+import UnderstandingFeedback from './components/UnderstandingFeedback';
+import FeedbackPanel from './components/FeedbackPanel';
+import QuizResults from './components/QuizResults';
 
 // Initialize PDF.js worker
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.js`;
@@ -19,11 +22,21 @@ interface ChatMessage {
   timestamp: Date;
 }
 
-// Add this interface near the top with other interfaces
+// Add these interfaces at the top with other interfaces
+interface QuizOption {
+  id: string;
+  text: string;
+}
+
 interface QuizQuestion {
+  id: string;
   question: string;
-  options?: string[];
-  correctAnswer?: string;
+  options: QuizOption[];
+}
+
+interface Quiz {
+  quiz_title: string;
+  questions: QuizQuestion[];
 }
 
 function MainAppContent() {
@@ -40,23 +53,30 @@ function MainAppContent() {
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [learningProgress, setLearningProgress] = useState({
-    completed: 3,
-    total: 10,
-    currentTopic: 'Introduction to React',
-    timeSpent: '45 minutes'
+    currentPage: 1,
+    totalPages: 1
   });
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: 'assistant',
-      content: "Hello! I'm your AI Learning Assistant. How can I help you today?",
+      content: "Hello! I'm your AI Learning Assistant. Please upload a PDF to begin our discussion.",
       timestamp: new Date()
     }
   ]);
   const [isLoading, setIsLoading] = useState(false);
-  const [currentQuiz, setCurrentQuiz] = useState<QuizQuestion | null>(null);
+  const [currentQuiz, setCurrentQuiz] = useState<Quiz | null>(null);
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [quizAnswers, setQuizAnswers] = useState<Record<string, string>>({});
+  const [showQuiz, setShowQuiz] = useState(false);
+  const [keyPoints, setKeyPoints] = useState<string[]>([]);
+  const [understandingAssessment, setUnderstandingAssessment] = useState<any>(null);
+  const [showFeedback, setShowFeedback] = useState(true);
+  const [quizResults, setQuizResults] = useState<any>(null);
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
+    console.log("File selected:", file);
+    
     if (file && file.type === 'application/pdf') {
       setIsLoading(true);
       setUploadedFile(file);
@@ -68,24 +88,46 @@ function MainAppContent() {
         formData.append('start_page', '1');
         formData.append('professor_name', 'Andrew NG');
 
+        console.log("Uploading file...");
         const response = await fetch('http://localhost:8000/upload', {
           method: 'POST',
           body: formData,
         });
 
         if (!response.ok) {
+          const errorText = await response.text();
+          console.error("Upload error:", errorText);
           throw new Error('Upload failed');
         }
 
         const data = await response.json();
+        console.log("Upload response:", data);
         
-        // Add initial response to messages
-        const assistantMessage: ChatMessage = {
-          role: 'assistant',
-          content: data.message,
-          timestamp: new Date()
-        };
-        setMessages(prev => [...prev, assistantMessage]);
+        // Create new messages array starting fresh
+        const newMessages: ChatMessage[] = [
+          {
+            role: 'assistant',
+            content: data.message,
+            timestamp: new Date()
+          }
+        ];
+
+        // Add verification question if present
+        if (data.verification_question) {
+          newMessages.push({
+            role: 'assistant',
+            content: '🤔 Verification Question:\n' + data.verification_question,
+            timestamp: new Date()
+          });
+        }
+
+        // Store key points in state instead of adding to messages
+        if (data.key_points && data.key_points.length > 0) {
+          setKeyPoints(data.key_points);
+        }
+
+        // Replace all messages with new ones
+        setMessages(newMessages);
 
         // Create new conversation
         const newConversation: ChatConversation = {
@@ -95,6 +137,7 @@ function MainAppContent() {
           lastUpdated: new Date()
         };
         
+        console.log("Setting new conversation:", newConversation);
         setConversations(prev => [...prev, newConversation]);
         setActiveConversationId(newConversation.id);
         
@@ -134,6 +177,8 @@ function MainAppContent() {
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
+    console.log("Sending message:", message, "ConversationId:", activeConversationId);
+    
     if (message.trim() && activeConversationId) {
       setIsLoading(true);
       
@@ -143,9 +188,19 @@ function MainAppContent() {
         content: message.trim(),
         timestamp: new Date()
       };
-      setMessages(prev => [...prev, userMessage]);
+      console.log("Adding user message:", userMessage);
+      setMessages(prev => {
+        console.log("Previous messages before adding user message:", prev);
+        return [...prev, userMessage];
+      });
       
       try {
+        console.log("Making API request with:", {
+          object_id: activeConversationId,
+          message: message.trim(),
+          current_page: currentPage
+        });
+
         const response = await fetch('http://localhost:8000/chat', {
           method: 'POST',
           headers: {
@@ -159,37 +214,88 @@ function MainAppContent() {
         });
 
         if (!response.ok) {
+          const errorText = await response.text();
+          console.error("API Error:", errorText);
           throw new Error('Failed to send message');
         }
 
         const data = await response.json();
+        console.log("Received chat response:", data);
         
-        // Handle verification question if present
-        if (data.verification_question) {
-          setCurrentQuiz({
-            question: data.verification_question,
-            options: data.options || [],
-            correctAnswer: data.correct_answer
+        const newMessages: ChatMessage[] = [];
+        
+        if (data.message) {
+          newMessages.push({
+            role: 'assistant',
+            content: data.message,
+            timestamp: new Date()
           });
         }
-        
-        // Add assistant's response
-        const assistantMessage: ChatMessage = {
-          role: 'assistant',
-          content: data.message,
-          timestamp: new Date()
-        };
-        setMessages(prev => [...prev, assistantMessage]);
-        
-        // Handle audio if enabled
-        if (audioEnabled && data.audio_url) {
-          const audio = new Audio(`http://localhost:8000${data.audio_url}`);
-          audio.play();
+
+        if (data.verification_question) {
+          newMessages.push({
+            role: 'assistant',
+            content: '🤔 Verification Question:\n' + data.verification_question,
+            timestamp: new Date()
+          });
         }
 
-        // Update current page if it changed
-        if (data.current_page !== currentPage) {
-          setCurrentPage(data.current_page);
+        // Update key points if present
+        if (data.key_points && data.key_points.length > 0) {
+          setKeyPoints(prev => [...prev, ...data.key_points]);
+        }
+
+        // Store understanding assessment
+        if (data.understanding_assessment) {
+          setUnderstandingAssessment(data.understanding_assessment);
+        }
+
+        setMessages(prev => {
+          console.log("Previous messages:", prev);
+          const updated = [...prev, ...newMessages];
+          console.log("Updated messages:", updated);
+          return updated;
+        });
+
+        // Handle recommended action
+        if (data.understanding_assessment?.recommended_action === 'next') {
+          console.log("Moving to next page");
+          setCurrentPage(prev => Math.min(prev + 1, numPages));
+        } else if (data.understanding_assessment?.recommended_action === 'stay') {
+          console.log("Staying on current page");
+        }
+
+        // Check quiz readiness after processing the chat response
+        if (activeConversationId) {
+          try {
+            const quizCheckResponse = await fetch(
+              `http://localhost:8000/check-quiz-readiness/${activeConversationId}/${currentPage}`
+            );
+            const quizCheckData = await quizCheckResponse.json();
+            
+            if (quizCheckData.quiz_recommended) {
+              // Fetch quiz when recommended
+              const quizResponse = await fetch(
+                `http://localhost:8000/generate-quiz/${activeConversationId}/${currentPage}`
+              );
+              const quizData = await quizResponse.json();
+              
+              // Set quiz data and show quiz UI
+              setCurrentQuiz(quizData);
+              setShowQuiz(true);
+              setCurrentQuestionIndex(0);
+              setQuizAnswers({});
+              
+              // Add a message about quiz availability
+              setMessages(prev => [...prev, {
+                role: 'assistant',
+                content: '📝 You\'re ready for a quiz! Scroll down to test your understanding.',
+                timestamp: new Date()
+              }]);
+            }
+          } catch (error) {
+            console.error('Error checking quiz readiness:', error);
+          }
         }
 
       } catch (error) {
@@ -199,12 +305,25 @@ function MainAppContent() {
         setMessage('');
         setIsLoading(false);
       }
+    } else {
+      console.log("Message or conversationId missing:", { message, activeConversationId });
     }
   };
 
   const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
     setNumPages(numPages);
+    setLearningProgress(prev => ({
+      ...prev,
+      totalPages: numPages
+    }));
   };
+
+  useEffect(() => {
+    setLearningProgress(prev => ({
+      ...prev,
+      currentPage: currentPage
+    }));
+  }, [currentPage]);
 
   const goToPreviousPage = () => {
     setCurrentPage((prev) => Math.max(prev - 1, 1));
@@ -214,12 +333,66 @@ function MainAppContent() {
     setCurrentPage((prev) => Math.min(prev + 1, numPages));
   };
 
-  // Add handleQuizSubmit function
-  const handleQuizSubmit = (answer: string) => {
-    if (currentQuiz && currentQuiz.correctAnswer) {
-      const isCorrect = answer === currentQuiz.correctAnswer;
-      // You can handle the result as needed
-      alert(isCorrect ? "Correct!" : "Incorrect. Try again!");
+  // Add this function to check quiz readiness
+  const checkQuizReadiness = async () => {
+    if (!activeConversationId) return;
+    
+    try {
+      const response = await fetch(
+        `http://localhost:8000/check-quiz-readiness/${activeConversationId}/${currentPage}`
+      );
+      const data = await response.json();
+      
+      if (data.quiz_recommended) {
+        const quizResponse = await fetch(
+          `http://localhost:8000/generate-quiz/${activeConversationId}/${currentPage}`
+        );
+        const quizData = await quizResponse.json();
+        setCurrentQuiz(quizData);
+        setShowQuiz(true);
+        setCurrentQuestionIndex(0);
+        setQuizAnswers({});
+      }
+    } catch (error) {
+      console.error('Error checking quiz readiness:', error);
+    }
+  };
+
+  // Add this function to handle answer selection
+  const handleAnswerSelect = async (questionId: string, answerId: string) => {
+    const newAnswers = { ...quizAnswers, [questionId]: answerId };
+    setQuizAnswers(newAnswers);
+
+    // If this was the last question, submit the quiz
+    if (currentQuiz && currentQuestionIndex === currentQuiz.questions.length - 1) {
+      try {
+        const response = await fetch('http://localhost:8000/evaluate-quiz', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            object_id: activeConversationId,
+            current_page: currentPage,
+            answers: newAnswers,
+          }),
+        });
+        
+        const results = await response.json();
+        setQuizResults(results);
+        
+        // Move to next page if allowed
+        if (results.can_move_forward) {
+          setTimeout(() => {
+            setCurrentPage(prev => Math.min(prev + 1, numPages));
+          }, 2000); // Wait 2 seconds before moving to next page
+        }
+      } catch (error) {
+        console.error('Error submitting quiz:', error);
+      }
+    } else {
+      // Move to next question
+      setCurrentQuestionIndex(prev => prev + 1);
     }
   };
 
@@ -236,8 +409,8 @@ function MainAppContent() {
       />
       
       <main className="flex-1 flex flex-col">
-        <div className="min-h-screen bg-gray-50 p-8">
-          <div className="max-w-7xl mx-auto">
+        <div className="min-h-screen bg-gray-50 p-4">
+          <div className="max-w-[95%] mx-auto">
             {/* Header with Audio Toggle and Notes Toggle */}
             <div className="flex justify-end mb-6 gap-4">
               <button
@@ -271,9 +444,9 @@ function MainAppContent() {
             <div className="space-y-8">
               {/* Horizontally scrollable container for main components */}
               <div className="overflow-x-auto">
-                <div className="flex gap-8 min-w-max pb-4">
+                <div className="flex gap-4 min-w-max pb-4">
                   {/* PDF Viewer - Fixed width */}
-                  <div className="w-[800px] space-y-4">
+                  <div className="w-[1000px] space-y-4">
                     <div className="bg-white p-6 rounded-xl shadow-sm">
                       {!fileUrl ? (
                         <div className="border-2 border-dashed border-gray-300 rounded-lg p-12 text-center">
@@ -305,7 +478,7 @@ function MainAppContent() {
                             >
                               <Page 
                                 pageNumber={currentPage}
-                                width={800}
+                                width={1000}
                                 className="shadow-lg"
                               />
                             </Document>
@@ -362,12 +535,12 @@ function MainAppContent() {
                           <div className="w-full bg-gray-100 rounded-full h-2">
                             <div
                               className="bg-green-500 h-2 rounded-full transition-all duration-500"
-                              style={{ width: `${(learningProgress.completed / learningProgress.total) * 100}%` }}
+                              style={{ width: `${(currentPage / numPages) * 100}%` }}
                             />
                           </div>
                         </div>
                         <span className="text-sm text-gray-500">
-                          {learningProgress.completed}/{learningProgress.total}
+                          Page {currentPage} of {numPages}
                         </span>
                       </div>
                     </div>
@@ -375,28 +548,33 @@ function MainAppContent() {
 
                   {/* Chat Interface - Fixed width */}
                   {!isChatMinimized && (
-                    <div className="w-[400px]">
+                    <div className="w-[450px]">
                       <div className="bg-white p-4 rounded-xl shadow-sm h-[600px] flex flex-col">
                         <div className="flex-1 overflow-y-auto mb-4 space-y-4">
-                          {messages.map((msg, index) => (
-                            <div key={index} className="flex items-start gap-2">
-                              {msg.role === 'assistant' ? (
-                                <Bot className="w-8 h-8 text-blue-500" />
-                              ) : (
-                                <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center">
-                                  <span className="text-sm">You</span>
+                          {messages.map((msg, index) => {
+                            console.log("Rendering message:", msg);
+                            return (
+                              <div 
+                                key={index} 
+                                className={`flex items-start gap-2 ${
+                                  msg.content.startsWith('🤔 Verification Question:') ? 'bg-blue-50 p-4 rounded-lg' : ''
+                                }`}
+                              >
+                                {msg.role === 'assistant' ? (
+                                  <Bot className="w-8 h-8 text-blue-500" />
+                                ) : (
+                                  <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center">
+                                    <span className="text-gray-600">U</span>
+                                  </div>
+                                )}
+                                <div className={`${
+                                  msg.role === 'assistant' ? 'bg-gray-100' : 'bg-blue-100'
+                                } rounded-lg p-3 max-w-[80%]`}>
+                                  <div className="whitespace-pre-wrap">{msg.content}</div>
                                 </div>
-                              )}
-                              <div className={`rounded-lg p-3 max-w-[80%] ${
-                                msg.role === 'assistant' ? 'bg-gray-100' : 'bg-blue-500 text-white'
-                              }`}>
-                                <p className="text-sm">{msg.content}</p>
-                                <span className="text-xs text-gray-500 mt-1 block">
-                                  {msg.timestamp.toLocaleTimeString()}
-                                </span>
                               </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                           {isLoading && (
                             <div className="flex items-center gap-2">
                               <Bot className="w-8 h-8 text-blue-500" />
@@ -430,49 +608,113 @@ function MainAppContent() {
                     </div>
                   )}
 
+                  {/* Feedback Panel */}
+                  {understandingAssessment && showFeedback && (
+                    <div className="w-[450px]">
+                      <FeedbackPanel 
+                        assessment={understandingAssessment} 
+                        onClose={() => setShowFeedback(false)}
+                      />
+                    </div>
+                  )}
+
                   {/* Notes Panel - Fixed width */}
                   {isNotesOpen && (
-                    <div className="w-[400px]">
-                      <NotesPanel onClose={() => setIsNotesOpen(false)} />
+                    <div className="w-[450px]">
+                      <NotesPanel 
+                        onClose={() => setIsNotesOpen(false)} 
+                        keyPoints={keyPoints}
+                      />
                     </div>
                   )}
                 </div>
               </div>
 
-              {/* Quiz Section - Full width */}
-              <div className="bg-white p-6 rounded-xl shadow-sm">
-                <h3 className="text-lg font-semibold mb-4">Verification Question</h3>
-                <div className="border-t pt-4">
-                  {currentQuiz ? (
-                    <div className="space-y-4">
-                      <p className="text-gray-700 font-medium">{currentQuiz.question}</p>
-                      {currentQuiz.options && (
-                        <div className="space-y-2">
-                          {currentQuiz.options.map((option, index) => (
-                            <button
-                              key={index}
-                              onClick={() => handleQuizSubmit(option)}
-                              className="w-full text-left p-3 rounded-lg border hover:bg-gray-50 
-                                transition-colors duration-200 focus:outline-none focus:ring-2 
-                                focus:ring-blue-500"
-                            >
-                              {option}
-                            </button>
-                          ))}
+              {/* Quiz Section with Results */}
+              <div className="flex gap-4">
+                {showQuiz && currentQuiz && (
+                  <div className="flex-1">
+                    <div className="bg-white p-6 rounded-xl shadow-sm">
+                      <div className="flex justify-between items-center mb-4">
+                        <h3 className="text-lg font-semibold">{currentQuiz.quiz_title}</h3>
+                        <button
+                          onClick={() => setShowQuiz(false)}
+                          className="text-gray-500 hover:text-gray-700"
+                        >
+                          <X className="w-5 h-5" />
+                        </button>
+                      </div>
+                      
+                      <div className="border-t pt-4">
+                        <div className="space-y-6">
+                          <div className="flex justify-between items-center">
+                            <div className="text-sm text-gray-500">
+                              Question {currentQuestionIndex + 1} of {currentQuiz.questions.length}
+                            </div>
+                            <div className="h-2 bg-gray-200 rounded-full w-48">
+                              <div 
+                                className="h-2 bg-blue-500 rounded-full transition-all duration-300"
+                                style={{ width: `${((currentQuestionIndex + 1) / currentQuiz.questions.length) * 100}%` }}
+                              />
+                            </div>
+                          </div>
+                          
+                          <div className="space-y-4">
+                            <p className="text-lg font-medium">
+                              {currentQuiz.questions[currentQuestionIndex].question}
+                            </p>
+                            
+                            <div className="space-y-3">
+                              {currentQuiz.questions[currentQuestionIndex].options.map((option) => (
+                                <button
+                                  key={option.id}
+                                  onClick={() => handleAnswerSelect(
+                                    currentQuiz.questions[currentQuestionIndex].id,
+                                    option.id
+                                  )}
+                                  className={`w-full text-left p-4 rounded-lg border transition-all
+                                    ${
+                                      quizAnswers[currentQuiz.questions[currentQuestionIndex].id] === option.id
+                                        ? 'bg-blue-50 border-blue-500'
+                                        : 'hover:bg-gray-50'
+                                    }
+                                  `}
+                                >
+                                  <span className="font-medium">{option.id.toUpperCase()}.</span> {option.text}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
                         </div>
-                      )}
+                      </div>
                     </div>
-                  ) : (
-                    <p className="text-gray-600">
-                      Verification questions will appear here as you chat with the AI.
-                    </p>
-                  )}
-                </div>
+                  </div>
+                )}
+                
+                {quizResults && (
+                  <div className="w-[400px]">
+                    <QuizResults 
+                      results={quizResults}
+                      onClose={() => setQuizResults(null)}
+                    />
+                  </div>
+                )}
               </div>
             </div>
           </div>
         </div>
       </main>
+
+      {/* Add a button to show feedback panel when minimized */}
+      {understandingAssessment && !showFeedback && (
+        <button
+          onClick={() => setShowFeedback(true)}
+          className="fixed bottom-4 right-4 bg-blue-500 text-white p-2 rounded-lg shadow-lg hover:bg-blue-600 transition-colors flex items-center gap-2"
+        >
+          <BarChart2 className="w-5 h-5" />
+          Show Assessment
+        </button>
+      )}
     </div>
   );
 }

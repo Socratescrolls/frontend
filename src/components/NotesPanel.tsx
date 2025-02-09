@@ -3,9 +3,10 @@ import { Save, X } from 'lucide-react';
 
 interface NotesPanelProps {
   onClose: () => void;
+  keyPoints: string[];
 }
 
-const NotesPanel: React.FC<NotesPanelProps> = ({ onClose }) => {
+const NotesPanel: React.FC<NotesPanelProps> = ({ onClose, keyPoints }) => {
   const [notes, setNotes] = useState('');
 
   const handleSave = () => {
@@ -29,6 +30,23 @@ const NotesPanel: React.FC<NotesPanelProps> = ({ onClose }) => {
           className="w-full h-full p-2 border rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
           placeholder="Type your notes here..."
         />
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        {keyPoints.length > 0 ? (
+          <div className="space-y-4">
+            <h4 className="font-medium text-gray-700">Key Points:</h4>
+            <ul className="space-y-2">
+              {keyPoints.map((point, index) => (
+                <li key={index} className="flex items-start gap-2">
+                  <span className="text-blue-500">•</span>
+                  <span>{point}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : (
+          <p className="text-gray-500">No key points available yet.</p>
+        )}
       </div>
     </div>
   );
