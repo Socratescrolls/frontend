@@ -36,7 +36,7 @@ function WelcomeForm() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-[calc(100vh-4rem)] bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md mx-auto bg-white rounded-lg shadow-sm p-8">
         <div className="text-center mb-8">
           <BookOpen className="mx-auto h-12 w-12 text-indigo-600" />
