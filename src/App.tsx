@@ -11,6 +11,9 @@ import { v4 as uuidv4 } from 'uuid';
 import UnderstandingFeedback from './components/UnderstandingFeedback';
 import FeedbackPanel from './components/FeedbackPanel';
 import QuizResults from './components/QuizResults';
+import ProfessorHeader from './components/ProfessorHeader';
+import axios from 'axios';
+import { ChatInterface } from './components/ChatInterface';
 
 // Initialize PDF.js worker
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.js`;
@@ -37,6 +40,17 @@ interface QuizQuestion {
 interface Quiz {
   quiz_title: string;
   questions: QuizQuestion[];
+}
+
+// Add proper typing for understanding assessment
+interface UnderstandingAssessmentType {
+  understanding_assessment: {
+    level: 'low' | 'medium' | 'high';
+    feedback: string;
+    areas_to_improve: string[];
+  };
+  recommended_action: 'stay' | 'next';
+  reasoning: string;
 }
 
 function MainAppContent() {
@@ -69,11 +83,18 @@ function MainAppContent() {
   const [quizAnswers, setQuizAnswers] = useState<Record<string, string>>({});
   const [showQuiz, setShowQuiz] = useState(false);
   const [keyPoints, setKeyPoints] = useState<string[]>([]);
-  const [understandingAssessment, setUnderstandingAssessment] = useState<any>(null);
-  const [showFeedback, setShowFeedback] = useState(true);
+  const [hasFirstResponse, setHasFirstResponse] = useState(false);
+  const [showFeedback, setShowFeedback] = useState(false);
   const [quizResults, setQuizResults] = useState<any>(null);
+  const [professorName, setProfessorName] = useState('Andrew NG');
+  const [audioPlayer, setAudioPlayer] = useState<HTMLAudioElement | null>(null);
+  const [understandingAssessment, setUnderstandingAssessment] = useState<UnderstandingAssessmentType | null>(null);
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    setHasFirstResponse(false);
+    setUnderstandingAssessment(null);
+    setShowFeedback(false);
+    
     const file = event.target.files?.[0];
     console.log("File selected:", file);
     
@@ -86,7 +107,7 @@ function MainAppContent() {
         const formData = new FormData();
         formData.append('file', file);
         formData.append('start_page', '1');
-        formData.append('professor_name', 'Andrew NG');
+        formData.append('professor_name', professorName);
 
         console.log("Uploading file...");
         const response = await fetch('http://localhost:8000/upload', {
@@ -177,7 +198,6 @@ function MainAppContent() {
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log("Sending message:", message, "ConversationId:", activeConversationId);
     
     if (message.trim() && activeConversationId) {
       setIsLoading(true);
@@ -188,19 +208,9 @@ function MainAppContent() {
         content: message.trim(),
         timestamp: new Date()
       };
-      console.log("Adding user message:", userMessage);
-      setMessages(prev => {
-        console.log("Previous messages before adding user message:", prev);
-        return [...prev, userMessage];
-      });
+      setMessages(prev => [...prev, userMessage]);
       
       try {
-        console.log("Making API request with:", {
-          object_id: activeConversationId,
-          message: message.trim(),
-          current_page: currentPage
-        });
-
         const response = await fetch('http://localhost:8000/chat', {
           method: 'POST',
           headers: {
@@ -213,17 +223,27 @@ function MainAppContent() {
           }),
         });
 
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error("API Error:", errorText);
-          throw new Error('Failed to send message');
+        const data = await response.json();
+        
+        // Handle audio if enabled and audio_url is provided
+        if (audioEnabled && data.audio_url) {
+          console.log('Attempting to play audio from:', data.audio_url);
+          const audio = new Audio(data.audio_url);
+          
+          audio.addEventListener('error', (e) => {
+            console.error('Audio error:', e);
+          });
+
+          try {
+            await audio.play();
+            console.log('Audio playback started');
+          } catch (error) {
+            console.error('Audio playback failed:', error);
+          }
         }
 
-        const data = await response.json();
-        console.log("Received chat response:", data);
-        
+        // Add assistant messages
         const newMessages: ChatMessage[] = [];
-        
         if (data.message) {
           newMessages.push({
             role: 'assistant',
@@ -247,13 +267,11 @@ function MainAppContent() {
 
         // Store understanding assessment
         if (data.understanding_assessment) {
-          setUnderstandingAssessment(data.understanding_assessment);
+          setUnderstandingAssessment(data);
         }
 
         setMessages(prev => {
-          console.log("Previous messages:", prev);
           const updated = [...prev, ...newMessages];
-          console.log("Updated messages:", updated);
           return updated;
         });
 
@@ -305,8 +323,6 @@ function MainAppContent() {
         setMessage('');
         setIsLoading(false);
       }
-    } else {
-      console.log("Message or conversationId missing:", { message, activeConversationId });
     }
   };
 
@@ -396,6 +412,64 @@ function MainAppContent() {
     }
   };
 
+  const playAudio = async (text: string) => {
+    try {
+        // Request TTS conversion
+        const response = await fetch('http://localhost:8000/api/tts', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                text,
+                voice: 'alloy',
+                model: 'tts-1'
+            }),
+        });
+        
+        const data = await response.json();
+        
+        // Stop any currently playing audio
+        if (audioPlayer) {
+            audioPlayer.pause();
+            audioPlayer.currentTime = 0;
+        }
+        
+        // Create and play new audio with full URL
+        const audioUrl = `http://localhost:8000${data.audio_url}`;
+        console.log('Playing audio from URL:', audioUrl); // Add this for debugging
+        
+        const audio = new Audio(audioUrl);
+        
+        // Add error handling for audio loading
+        audio.onerror = (e) => {
+            console.error('Audio loading error:', e);
+        };
+        
+        // Add event listener for when audio is ready
+        audio.oncanplaythrough = async () => {
+            try {
+                setAudioPlayer(audio);
+                await audio.play();
+            } catch (error) {
+                console.error('Error playing audio:', error);
+            }
+        };
+        
+    } catch (error) {
+        console.error('Error generating audio:', error);
+    }
+  };
+
+  // Update the handleSubmit function in ChatInterface to properly handle the response
+  const handleChatResponse = (data: any) => {
+    if (data.understanding_assessment) {
+      setUnderstandingAssessment(data);
+      setHasFirstResponse(true);
+      setShowFeedback(true);
+    }
+  };
+
   return (
     <div className="flex h-screen bg-gray-100">
       <Sidebar
@@ -427,10 +501,19 @@ function MainAppContent() {
               </button>
               <button
                 onClick={() => setAudioEnabled(!audioEnabled)}
-                className="flex items-center gap-2 bg-white px-4 py-2 rounded-lg shadow-sm hover:shadow-md transition-all"
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg shadow-sm hover:shadow-md transition-all ${
+                  audioEnabled 
+                    ? 'bg-green-500 text-white' 
+                    : 'bg-white text-gray-500'
+                }`}
+                title={audioEnabled ? 'Click to disable voice responses' : 'Click to enable voice responses'}
               >
-                {audioEnabled ? <Mic className="text-green-500" /> : <MicOff className="text-red-500" />}
-                {audioEnabled ? 'Audio Enabled' : 'Audio Disabled'}
+                {audioEnabled ? (
+                  <Mic className="w-5 h-5" />
+                ) : (
+                  <MicOff className="w-5 h-5" />
+                )}
+                {audioEnabled ? 'Voice Enabled' : 'Voice Disabled'}
               </button>
               <button
                 onClick={() => setIsNotesOpen(!isNotesOpen)}
@@ -442,293 +525,196 @@ function MainAppContent() {
             </div>
 
             <div className="space-y-8">
-              {/* Horizontally scrollable container for main components */}
-              <div className="overflow-x-auto">
-                <div className="flex gap-4 min-w-max pb-4">
-                  {/* PDF Viewer - Fixed width */}
-                  <div className="w-[1000px] space-y-4">
-                    <div className="bg-white p-6 rounded-xl shadow-sm">
-                      {!fileUrl ? (
-                        <div className="border-2 border-dashed border-gray-300 rounded-lg p-12 text-center">
-                          <input
-                            type="file"
-                            id="file-upload"
-                            accept=".pdf"
-                            onChange={handleFileUpload}
-                            className="hidden"
-                          />
-                          <label
-                            htmlFor="file-upload"
-                            className="cursor-pointer flex flex-col items-center gap-4"
-                          >
-                            <Upload className="w-16 h-16 text-blue-500" />
-                            <div className="text-gray-600">
-                              <span className="text-blue-500 font-semibold text-lg">Click to upload</span> or drag and drop
-                              <p className="text-sm text-gray-500">PDF files only</p>
-                            </div>
-                          </label>
-                        </div>
-                      ) : (
-                        <div className="relative">
-                          <div className="flex justify-center mb-4">
-                            <Document
-                              file={fileUrl}
-                              onLoadSuccess={onDocumentLoadSuccess}
-                              className="max-w-full"
-                            >
-                              <Page 
-                                pageNumber={currentPage}
-                                width={1000}
-                                className="shadow-lg"
-                              />
-                            </Document>
+              {/* Main content area */}
+              <div className="flex gap-4">
+                {/* Left side - PDF Viewer */}
+                <div className="flex-1">
+                  <div className="bg-white p-6 rounded-xl shadow-sm">
+                    {!fileUrl ? (
+                      <div className="border-2 border-dashed border-gray-300 rounded-lg p-12 text-center">
+                        <input
+                          type="file"
+                          id="file-upload"
+                          accept=".pdf"
+                          onChange={handleFileUpload}
+                          className="hidden"
+                        />
+                        <label
+                          htmlFor="file-upload"
+                          className="cursor-pointer flex flex-col items-center gap-4"
+                        >
+                          <Upload className="w-16 h-16 text-blue-500" />
+                          <div className="text-gray-600">
+                            <span className="text-blue-500 font-semibold text-lg">Click to upload</span> or drag and drop
+                            <p className="text-sm text-gray-500">PDF files only</p>
                           </div>
-                          
-                          {/* Navigation Controls */}
-                          <div className="flex justify-center items-center gap-4 mt-4">
-                            <button
-                              onClick={goToPreviousPage}
-                              disabled={currentPage <= 1}
-                              className={`p-2 rounded-full ${
-                                currentPage <= 1
-                                  ? 'bg-gray-100 text-gray-400'
-                                  : 'bg-blue-500 text-white hover:bg-blue-600'
-                              } transition-colors`}
-                            >
-                              <ChevronLeft className="w-6 h-6" />
-                            </button>
-                            <span className="text-sm text-gray-600">
-                              Page {currentPage} of {numPages}
-                            </span>
-                            <button
-                              onClick={goToNextPage}
-                              disabled={currentPage >= numPages}
-                              className={`p-2 rounded-full ${
-                                currentPage >= numPages
-                                  ? 'bg-gray-100 text-gray-400'
-                                  : 'bg-blue-500 text-white hover:bg-blue-600'
-                              } transition-colors`}
-                            >
-                              <ChevronRight className="w-6 h-6" />
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                      {uploadedFile && progress < 100 && (
-                        <div className="mt-4">
-                          <p className="text-sm text-gray-600 mb-2">{uploadedFile.name}</p>
-                          <div className="w-full bg-gray-200 rounded-full h-1">
-                            <div
-                              className="bg-blue-500 h-1 rounded-full transition-all duration-500"
-                              style={{ width: `${progress}%` }}
-                            ></div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Compact Learning Progress */}
-                    <div className="bg-white p-4 rounded-xl shadow-sm">
-                      <div className="flex items-center gap-4">
-                        <BarChart2 className="text-blue-500 w-5 h-5" />
-                        <div className="flex-1">
-                          <div className="w-full bg-gray-100 rounded-full h-2">
-                            <div
-                              className="bg-green-500 h-2 rounded-full transition-all duration-500"
-                              style={{ width: `${(currentPage / numPages) * 100}%` }}
-                            />
-                          </div>
-                        </div>
-                        <span className="text-sm text-gray-500">
-                          Page {currentPage} of {numPages}
-                        </span>
+                        </label>
                       </div>
-                    </div>
+                    ) : (
+                      <div className="relative">
+                        <div className="flex justify-center mb-4">
+                          <Document
+                            file={fileUrl}
+                            onLoadSuccess={onDocumentLoadSuccess}
+                            className="max-w-full"
+                          >
+                            <Page 
+                              pageNumber={currentPage}
+                              width={1000}
+                              className="shadow-lg"
+                            />
+                          </Document>
+                        </div>
+                        
+                        {/* Navigation Controls */}
+                        <div className="flex justify-center items-center gap-4 mt-4">
+                          <button
+                            onClick={goToPreviousPage}
+                            disabled={currentPage <= 1}
+                            className={`p-2 rounded-full ${
+                              currentPage <= 1
+                                ? 'bg-gray-100 text-gray-400'
+                                : 'bg-blue-500 text-white hover:bg-blue-600'
+                            } transition-colors`}
+                          >
+                            <ChevronLeft className="w-6 h-6" />
+                          </button>
+                          <span className="text-sm text-gray-600">
+                            Page {currentPage} of {numPages}
+                          </span>
+                          <button
+                            onClick={goToNextPage}
+                            disabled={currentPage >= numPages}
+                            className={`p-2 rounded-full ${
+                              currentPage >= numPages
+                                ? 'bg-gray-100 text-gray-400'
+                                : 'bg-blue-500 text-white hover:bg-blue-600'
+                            } transition-colors`}
+                          >
+                            <ChevronRight className="w-6 h-6" />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {uploadedFile && progress < 100 && (
+                      <div className="mt-4">
+                        <p className="text-sm text-gray-600 mb-2">{uploadedFile.name}</p>
+                        <div className="w-full bg-gray-200 rounded-full h-1">
+                          <div
+                            className="bg-blue-500 h-1 rounded-full transition-all duration-500"
+                            style={{ width: `${progress}%` }}
+                          ></div>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
-                  {/* Chat Interface - Fixed width */}
-                  {!isChatMinimized && (
-                    <div className="w-[450px]">
-                      <div className="bg-white p-4 rounded-xl shadow-sm h-[600px] flex flex-col">
-                        <div className="flex-1 overflow-y-auto mb-4 space-y-4">
-                          {messages.map((msg, index) => {
-                            console.log("Rendering message:", msg);
-                            return (
-                              <div 
-                                key={index} 
-                                className={`flex items-start gap-2 ${
-                                  msg.content.startsWith('🤔 Verification Question:') ? 'bg-blue-50 p-4 rounded-lg' : ''
-                                }`}
-                              >
-                                {msg.role === 'assistant' ? (
-                                  <Bot className="w-8 h-8 text-blue-500" />
-                                ) : (
-                                  <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center">
-                                    <span className="text-gray-600">U</span>
-                                  </div>
-                                )}
-                                <div className={`${
-                                  msg.role === 'assistant' ? 'bg-gray-100' : 'bg-blue-100'
-                                } rounded-lg p-3 max-w-[80%]`}>
-                                  <div className="whitespace-pre-wrap">{msg.content}</div>
-                                </div>
-                              </div>
-                            );
-                          })}
-                          {isLoading && (
-                            <div className="flex items-center gap-2">
-                              <Bot className="w-8 h-8 text-blue-500" />
-                              <div className="bg-gray-100 rounded-lg p-3">
-                                <div className="animate-pulse">Typing...</div>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-
-                        <form onSubmit={handleSendMessage} className="flex gap-2">
-                          <input
-                            type="text"
-                            value={message}
-                            onChange={(e) => setMessage(e.target.value)}
-                            placeholder="Type your message..."
-                            className="flex-1 border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            disabled={isLoading}
+                  {/* Compact Learning Progress */}
+                  <div className="bg-white p-4 rounded-xl shadow-sm mt-4">
+                    <div className="flex items-center gap-4">
+                      <BarChart2 className="text-blue-500 w-5 h-5" />
+                      <div className="flex-1">
+                        <div className="w-full bg-gray-100 rounded-full h-2">
+                          <div
+                            className="bg-green-500 h-2 rounded-full transition-all duration-500"
+                            style={{ width: `${(currentPage / numPages) * 100}%` }}
                           />
-                          <button
-                            type="submit"
-                            className={`${
-                              isLoading ? 'bg-gray-400' : 'bg-blue-500 hover:bg-blue-600'
-                            } text-white p-2 rounded-lg transition-colors`}
-                            disabled={isLoading}
-                          >
-                            <Send className="w-5 h-5" />
-                          </button>
-                        </form>
+                        </div>
                       </div>
+                      <span className="text-sm text-gray-500">
+                        Page {currentPage} of {numPages}
+                      </span>
                     </div>
-                  )}
+                  </div>
+                </div>
 
-                  {/* Feedback Panel */}
-                  {understandingAssessment && showFeedback && (
-                    <div className="w-[450px]">
-                      <FeedbackPanel 
-                        assessment={understandingAssessment} 
-                        onClose={() => setShowFeedback(false)}
-                      />
-                    </div>
+                {/* Middle - Chat Interface */}
+                <div className="w-[450px]">
+                  {!isChatMinimized && (
+                    <ChatInterface 
+                      onPlayAudio={playAudio}
+                      currentFileId={activeConversationId}
+                      currentPage={currentPage}
+                      setCurrentPage={setCurrentPage}
+                      audioEnabled={audioEnabled}
+                      professorName={professorName}
+                      initialMessages={messages}
+                      setShowFeedback={setShowFeedback}
+                      setUnderstandingAssessment={setUnderstandingAssessment}
+                      setHasFirstResponse={setHasFirstResponse}
+                      onChatResponse={handleChatResponse}
+                    />
                   )}
+                </div>
 
-                  {/* Notes Panel - Fixed width */}
+                {/* Right side - Understanding Feedback and Notes */}
+                <div className="w-[350px] space-y-4">
+                  {hasFirstResponse && showFeedback && understandingAssessment?.understanding_assessment && (
+                    <UnderstandingFeedback
+                      assessment={understandingAssessment}
+                      onClose={() => setShowFeedback(false)}
+                    />
+                  )}
                   {isNotesOpen && (
-                    <div className="w-[450px]">
-                      <NotesPanel 
-                        onClose={() => setIsNotesOpen(false)} 
-                        keyPoints={keyPoints}
-                      />
-                    </div>
+                    <NotesPanel
+                      currentPage={currentPage}
+                      keyPoints={keyPoints}
+                      onClose={() => setIsNotesOpen(false)}
+                    />
                   )}
                 </div>
               </div>
+            </div>
 
-              {/* Quiz Section with Results */}
-              <div className="flex gap-4">
-                {showQuiz && currentQuiz && (
-                  <div className="flex-1">
-                    <div className="bg-white p-6 rounded-xl shadow-sm">
-                      <div className="flex justify-between items-center mb-4">
-                        <h3 className="text-lg font-semibold">{currentQuiz.quiz_title}</h3>
+            {/* Quiz Component */}
+            {currentQuiz && (
+              <div className="bg-white rounded-xl shadow-sm p-4">
+                <h3 className="text-lg font-medium mb-4">
+                  {currentQuiz.quiz_title}
+                </h3>
+                {currentQuiz.questions[currentQuestionIndex] && (
+                  <div className="space-y-4">
+                    <p className="text-gray-700">
+                      {currentQuiz.questions[currentQuestionIndex].question}
+                    </p>
+                    <div className="space-y-2">
+                      {currentQuiz.questions[currentQuestionIndex].options.map((option) => (
                         <button
-                          onClick={() => setShowQuiz(false)}
-                          className="text-gray-500 hover:text-gray-700"
+                          key={option.id}
+                          onClick={() => handleAnswerSelect(
+                            currentQuiz.questions[currentQuestionIndex].id,
+                            option.id
+                          )}
+                          className="w-full text-left p-3 rounded-lg border hover:bg-blue-50 hover:border-blue-500 transition-colors"
                         >
-                          <X className="w-5 h-5" />
+                          {option.text}
                         </button>
-                      </div>
-                      
-                      <div className="border-t pt-4">
-                        <div className="space-y-6">
-                          <div className="flex justify-between items-center">
-                            <div className="text-sm text-gray-500">
-                              Question {currentQuestionIndex + 1} of {currentQuiz.questions.length}
-                            </div>
-                            <div className="h-2 bg-gray-200 rounded-full w-48">
-                              <div 
-                                className="h-2 bg-blue-500 rounded-full transition-all duration-300"
-                                style={{ width: `${((currentQuestionIndex + 1) / currentQuiz.questions.length) * 100}%` }}
-                              />
-                            </div>
-                          </div>
-                          
-                          <div className="space-y-4">
-                            <p className="text-lg font-medium">
-                              {currentQuiz.questions[currentQuestionIndex].question}
-                            </p>
-                            
-                            <div className="space-y-3">
-                              {currentQuiz.questions[currentQuestionIndex].options.map((option) => (
-                                <button
-                                  key={option.id}
-                                  onClick={() => handleAnswerSelect(
-                                    currentQuiz.questions[currentQuestionIndex].id,
-                                    option.id
-                                  )}
-                                  className={`w-full text-left p-4 rounded-lg border transition-all
-                                    ${
-                                      quizAnswers[currentQuiz.questions[currentQuestionIndex].id] === option.id
-                                        ? 'bg-blue-50 border-blue-500'
-                                        : 'hover:bg-gray-50'
-                                    }
-                                  `}
-                                >
-                                  <span className="font-medium">{option.id.toUpperCase()}.</span> {option.text}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
+                      ))}
                     </div>
                   </div>
                 )}
-                
-                {quizResults && (
-                  <div className="w-[400px]">
-                    <QuizResults 
-                      results={quizResults}
-                      onClose={() => setQuizResults(null)}
-                    />
-                  </div>
-                )}
               </div>
-            </div>
+            )}
+
+            {/* Quiz Results */}
+            {quizResults && (
+              <div className="bg-white rounded-xl shadow-sm p-4">
+                <h3 className="text-lg font-medium mb-4">Quiz Results</h3>
+                <div className="space-y-4">
+                  <p className="text-gray-700">
+                    Score: {quizResults.score_percentage}%
+                  </p>
+                  <p className="text-gray-700">
+                    {quizResults.recommendation_for_professor}
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </main>
-
-      {/* Add a button to show feedback panel when minimized */}
-      {understandingAssessment && !showFeedback && (
-        <button
-          onClick={() => setShowFeedback(true)}
-          className="fixed bottom-4 right-4 bg-blue-500 text-white p-2 rounded-lg shadow-lg hover:bg-blue-600 transition-colors flex items-center gap-2"
-        >
-          <BarChart2 className="w-5 h-5" />
-          Show Assessment
-        </button>
-      )}
     </div>
   );
 }
 
-function App() {
-  return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<WelcomeForm />} />
-        <Route path="/app" element={<MainAppContent />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </BrowserRouter>
-  );
-}
-
-export default App;
+export default MainAppContent;

@@ -1,82 +1,120 @@
 import React from 'react';
-import { AlertCircle, CheckCircle, ArrowRight, ArrowDown } from 'lucide-react';
+import { AlertCircle, CheckCircle, ArrowRight, ArrowDown, X, Brain } from 'lucide-react';
+
+interface UnderstandingAssessment {
+  level: 'low' | 'medium' | 'high';
+  feedback: string;
+  areas_to_improve: string[];
+}
 
 interface UnderstandingFeedbackProps {
   assessment: {
-    understanding_assessment: {
-      level: 'low' | 'medium' | 'high';
-      feedback: string;
-      areas_to_improve: string[];
-    };
+    understanding_assessment: UnderstandingAssessment;
     recommended_action: 'stay' | 'next';
+    reasoning: string;
   };
+  onClose: () => void;
 }
 
-const UnderstandingFeedback: React.FC<UnderstandingFeedbackProps> = ({ assessment }) => {
+export function UnderstandingFeedback({ assessment, onClose }: UnderstandingFeedbackProps) {
+  if (!assessment?.understanding_assessment) {
+    return null;
+  }
+
   const getLevelColor = (level: string) => {
     switch (level) {
       case 'low':
-        return 'text-red-500 bg-red-50';
+        return 'bg-red-50 text-red-700 border-red-200';
       case 'medium':
-        return 'text-yellow-500 bg-yellow-50';
+        return 'bg-yellow-50 text-yellow-700 border-yellow-200';
       case 'high':
-        return 'text-green-500 bg-green-50';
+        return 'bg-green-50 text-green-700 border-green-200';
       default:
-        return 'text-gray-500 bg-gray-50';
+        return 'bg-gray-50 text-gray-700 border-gray-200';
     }
   };
 
+  const getLevelIcon = (level: string) => {
+    switch (level) {
+      case 'high':
+        return <CheckCircle className="w-5 h-5 text-green-500" />;
+      case 'medium':
+        return <Brain className="w-5 h-5 text-yellow-500" />;
+      case 'low':
+        return <AlertCircle className="w-5 h-5 text-red-500" />;
+      default:
+        return null;
+    }
+  };
+
+  const { understanding_assessment } = assessment;
+  const areasToImprove = understanding_assessment.areas_to_improve || [];
+
   return (
-    <div className="bg-white rounded-lg p-4 space-y-4 border">
-      {/* Understanding Level */}
-      <div className={`flex items-center gap-2 p-2 rounded-md ${getLevelColor(assessment.understanding_assessment.level)}`}>
-        {assessment.understanding_assessment.level === 'high' ? (
-          <CheckCircle className="w-5 h-5" />
-        ) : (
-          <AlertCircle className="w-5 h-5" />
-        )}
-        <span className="font-medium capitalize">
-          {assessment.understanding_assessment.level} Understanding
-        </span>
-      </div>
-
-      {/* Feedback */}
-      <div className="space-y-2">
-        <h4 className="font-medium text-gray-700">Feedback:</h4>
-        <p className="text-gray-600">{assessment.understanding_assessment.feedback}</p>
-      </div>
-
-      {/* Areas to Improve */}
-      {assessment.understanding_assessment.areas_to_improve.length > 0 && (
-        <div className="space-y-2">
-          <h4 className="font-medium text-gray-700">Areas to Improve:</h4>
-          <ul className="space-y-1">
-            {assessment.understanding_assessment.areas_to_improve.map((area, index) => (
-              <li key={index} className="flex items-start gap-2 text-gray-600">
-                <span className="text-blue-500">•</span>
-                <span>{area}</span>
-              </li>
-            ))}
-          </ul>
+    <div className="bg-white rounded-xl shadow-sm p-4 h-[600px] flex flex-col">
+      <div className="flex justify-between items-center mb-4">
+        <div className="flex items-center gap-2">
+          <Brain className="w-6 h-6 text-blue-500" />
+          <h3 className="text-lg font-medium">Understanding Analysis</h3>
         </div>
-      )}
+        <button
+          onClick={onClose}
+          className="p-1 hover:bg-gray-100 rounded-full"
+        >
+          <X className="w-5 h-5" />
+        </button>
+      </div>
 
-      {/* Recommended Action */}
-      <div className="flex items-center gap-2 mt-4 p-2 rounded-md bg-blue-50 text-blue-600">
-        {assessment.recommended_action === 'next' ? (
-          <>
-            <ArrowRight className="w-5 h-5" />
-            <span>Ready to move to the next section!</span>
-          </>
-        ) : (
-          <>
-            <ArrowDown className="w-5 h-5" />
-            <span>Let's spend more time on this section.</span>
-          </>
+      <div className="flex-1 overflow-y-auto space-y-4">
+        {/* Understanding Level */}
+        <div className={`p-4 rounded-lg border ${getLevelColor(understanding_assessment.level)}`}>
+          <div className="flex items-center gap-2 mb-2">
+            {getLevelIcon(understanding_assessment.level)}
+            <span className="font-medium capitalize">
+              {understanding_assessment.level} Understanding
+            </span>
+          </div>
+          <p className="text-sm">{understanding_assessment.feedback}</p>
+        </div>
+
+        {/* Areas to Improve */}
+        {areasToImprove.length > 0 && (
+          <div className="p-4 bg-blue-50 rounded-lg">
+            <h4 className="font-medium text-blue-700 mb-2">Areas to Improve</h4>
+            <ul className="space-y-2">
+              {areasToImprove.map((area, index) => (
+                <li key={index} className="flex items-start gap-2 text-blue-600 text-sm">
+                  <span className="text-blue-400 mt-1">•</span>
+                  <span>{area}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
+
+        {/* Reasoning */}
+        <div className="p-4 bg-gray-50 rounded-lg">
+          <h4 className="font-medium text-gray-700 mb-2">Detailed Analysis</h4>
+          <p className="text-sm text-gray-600">{assessment.reasoning}</p>
+        </div>
+
+        {/* Recommended Action */}
+        <div className="flex items-center gap-2 p-4 rounded-lg bg-purple-50 text-purple-700">
+          {assessment.recommended_action === 'next' ? (
+            <>
+              <ArrowRight className="w-5 h-5" />
+              <span className="text-sm font-medium">Ready to move forward!</span>
+            </>
+          ) : (
+            <>
+              <ArrowDown className="w-5 h-5" />
+              <span className="text-sm font-medium">Let's review this section more.</span>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
-};
+}
 
 export default UnderstandingFeedback; 
